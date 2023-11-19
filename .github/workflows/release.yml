@@ -95,4 +95,3 @@ jobs:
         run: |
           $TagName = $env:GITHUB_REF -replace 'refs/tags/', ''
           Get-ChildItem -Path output\* -Include @('windows_exporter*.msi', 'windows_exporter*.exe', 'sha256sums.txt') | Foreach-Object {gh release upload $TagName $_}
-          make push-all
