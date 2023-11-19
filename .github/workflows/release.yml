@@ -83,7 +83,7 @@ jobs:
           foreach($Arch in "amd64", "arm64", "386") {
             Write-Verbose "Building windows_exporter $MSIVersion msi for $Arch"
             .\installer\build.ps1 -PathToExecutable .\output\windows_exporter-$BuildVersion-$Arch.exe -Version $MSIVersion -Arch "$Arch"
-            Move-Item installer\Output\windows_exporter-$MSIVersion-$Arch.msi output\
+            Move-Item installer\windows_exporter-$MSIVersion-$Arch.msi output\
           }
 
           promu checksum output\

@@ -19,7 +19,7 @@ Trap {
     Pop-Location
 }
 
-mkdir -Force Work, Output | Out-Null
+mkdir -Force Work | Out-Null
 Copy-Item -Force $PathToExecutable Work/windows_exporter.exe
 
 Write-Verbose "Creating windows_exporter-${Version}-${Arch}.msi"
