@@ -3,6 +3,7 @@
 package collector
 
 import (
+	"github.com/prometheus-community/windows_exporter/pkg/collector/perfdata"
 	"slices"
 	"strings"
 
@@ -83,6 +84,8 @@ func NewWithFlags(app *kingpin.Application) Collectors {
 }
 
 // NewWithConfig To be called by the external libraries for collector initialization without running kingpin.Parse
+//
+//goland:noinspection GoUnusedExportedFunction
 func NewWithConfig(logger log.Logger, config Config) Collectors {
 	collectors := map[string]types.Collector{}
 	collectors[ad.Name] = ad.New(logger, &config.Ad)
@@ -122,6 +125,7 @@ func NewWithConfig(logger log.Logger, config Config) Collectors {
 	collectors[netframework_clrsecurity.Name] = netframework_clrsecurity.New(logger, &config.NetframeworkClrsecurity)
 	collectors[nps.Name] = nps.New(logger, &config.Nps)
 	collectors[os.Name] = os.New(logger, &config.Os)
+	collectors[perfdata.Name] = perfdata.New(logger, &config.PerfData)
 	collectors[physical_disk.Name] = physical_disk.New(logger, &config.PhysicalDisk)
 	collectors[process.Name] = process.New(logger, &config.Process)
 	collectors[remote_fx.Name] = remote_fx.New(logger, &config.RemoteFx)

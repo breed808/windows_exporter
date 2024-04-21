@@ -37,6 +37,7 @@ import (
 	"github.com/prometheus-community/windows_exporter/pkg/collector/netframework_clrsecurity"
 	"github.com/prometheus-community/windows_exporter/pkg/collector/nps"
 	"github.com/prometheus-community/windows_exporter/pkg/collector/os"
+	"github.com/prometheus-community/windows_exporter/pkg/collector/perfdata"
 	"github.com/prometheus-community/windows_exporter/pkg/collector/physical_disk"
 	"github.com/prometheus-community/windows_exporter/pkg/collector/process"
 	"github.com/prometheus-community/windows_exporter/pkg/collector/remote_fx"
@@ -93,6 +94,7 @@ type Config struct {
 	NetframeworkClrsecurity        netframework_clrsecurity.Config        `yaml:"netframework_clrsecurity"`
 	Nps                            nps.Config                             `yaml:"nps"`
 	Os                             os.Config                              `yaml:"os"`
+	PerfData                       perfdata.Config                        `yaml:"perfdata"`
 	PhysicalDisk                   physical_disk.Config                   `yaml:"physical_disk"`
 	Process                        process.Config                         `yaml:"process"`
 	RemoteFx                       remote_fx.Config                       `yaml:"remote_fx"`
