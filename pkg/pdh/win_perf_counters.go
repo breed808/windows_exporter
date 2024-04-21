@@ -15,8 +15,6 @@ import (
 	"github.com/go-kit/log/level"
 )
 
-var sampleConfig string
-
 var defaultMaxBufferSize = 100 * 1024 * 1024
 
 type Accumulator map[string]map[string]map[string]float64
@@ -26,7 +24,6 @@ type WinPerfCounters struct {
 	PreVistaSupport            bool `toml:"PreVistaSupport" deprecated:"1.7.0;determined dynamically"`
 	UsePerfCounterTime         bool
 	Object                     []PerfObject
-	CountersRefreshInterval    time.Duration
 	UseWildcardsExpansion      bool
 	LocalizeWildcardsExpansion bool
 	IgnoredErrors              []string `toml:"IgnoredErrors"`
@@ -138,10 +135,6 @@ func extractCounterInfoFromCounterPath(counterPath string) (computer string, obj
 	object = counterPath[leftObjectBorderIndex+1 : rightObjectBorderIndex]
 	counter = counterPath[leftCounterBorderIndex+1:]
 	return computer, object, instance, counter, nil
-}
-
-func (m *WinPerfCounters) SampleConfig() string {
-	return sampleConfig
 }
 
 func (m *WinPerfCounters) hostname() string {
@@ -487,7 +480,7 @@ func (m *WinPerfCounters) gatherComputerCounters(hostCounterInfo *hostCountersIn
 				acc[metric.objectName] = make(map[string]map[string]float64)
 			}
 
-			if _, ok := acc[metric.counter]; !ok {
+			if _, ok := acc[metric.objectName][metric.counter]; !ok {
 				acc[metric.objectName][metric.counter] = make(map[string]float64)
 			}
 

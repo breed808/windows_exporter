@@ -11,6 +11,7 @@ import (
 	"github.com/prometheus-community/windows_exporter/pkg/pdh"
 	"github.com/prometheus-community/windows_exporter/pkg/types"
 	"github.com/prometheus/client_golang/prometheus"
+	"strings"
 )
 
 const Name = "perfdata"
@@ -25,7 +26,7 @@ type collector struct {
 
 	perfCounters pdh.WinPerfCounters
 
-	descriptors map[string]*prometheus.Desc
+	descriptors map[string]map[string]*prometheus.Desc
 }
 
 func New(logger log.Logger, _ *Config) types.Collector {
@@ -54,45 +55,62 @@ func (c *collector) Build() error {
 	c.perfCounters = pdh.WinPerfCounters{
 		Log:                        c.logger,
 		PrintValid:                 false,
-		UsePerfCounterTime:         false,
+		UsePerfCounterTime:         true,
 		UseWildcardsExpansion:      true,
-		LocalizeWildcardsExpansion: false,
+		LocalizeWildcardsExpansion: true,
 		Object: []pdh.PerfObject{
 			{
-				WarnOnMissing: true,
+				FailOnMissing: true,
 				ObjectName:    "Processor Information",
-				Instances:     []string{"*#1"},
-				Counters: []string{
-					"% Processor Performance",
-				},
-				UseRawValues: true,
+				Instances:     []string{"*"},
+				Counters:      []string{"% Processor Utility"},
+				UseRawValues:  true,
+				IncludeTotal:  false,
 			},
-			{
-				WarnOnMissing: true,
-				ObjectName:    "Processor Information",
-				Instances:     []string{"*#2"},
-				Counters: []string{
-					"% Processor Utility",
-					"% Processor Performance",
-				},
-				UseRawValues: true,
-			},
+			//{
+			//	FailOnMissing: true,
+			//	ObjectName:    "LogicalDisk",
+			//	Instances:     []string{"*"},
+			//	Counters:      []string{"*"},
+			//	UseRawValues:  true,
+			//	IncludeTotal:  false,
+			//},
+			//{
+			//	FailOnMissing: true,
+			//	ObjectName:    "PhysicalDisk",
+			//	Instances:     []string{"*"},
+			//	Counters:      []string{"*"},
+			//	UseRawValues:  true,
+			//	IncludeTotal:  false,
+			//},
 		},
 	}
 
-	_, err := c.perfCounters.Gather()
+	acc, err := c.perfCounters.Gather()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to gather perf data: %w", err)
 	}
 
-	c.descriptors = make(map[string]*prometheus.Desc)
+	counters, ok := acc["localhost"]
+	if !ok {
+		return errors.New("missing perf data")
+	}
 
-	c.descriptors["OSInformation"] = prometheus.NewDesc(
-		prometheus.BuildFQName(types.Namespace, Name, "info"),
-		"OperatingSystem.Caption, OperatingSystem.Version",
-		[]string{"product", "version", "major_version", "minor_version", "build_number", "revision"},
-		nil,
-	)
+	c.descriptors = map[string]map[string]*prometheus.Desc{}
+	for objectName, objectCounters := range counters {
+		subSystem := sanitizeMetricName(objectName)
+
+		c.descriptors[objectName] = map[string]*prometheus.Desc{}
+		for instanceName, _ := range objectCounters {
+			name := sanitizeMetricName(instanceName)
+			c.descriptors[objectName][instanceName] = prometheus.NewDesc(
+				prometheus.BuildFQName(types.Namespace+"_perfdata", subSystem, name),
+				fmt.Sprintf("Perf counter %s @ %s", objectName, instanceName),
+				[]string{"instance"},
+				nil,
+			)
+		}
+	}
 
 	return nil
 }
@@ -113,168 +131,41 @@ func (c *collector) collect(_ *types.ScrapeContext, ch chan<- prometheus.Metric)
 		return nil, fmt.Errorf("failed to gather perf data: %w", err)
 	}
 
-	counter, ok := acc["localhost"]
+	counters, ok := acc["localhost"]
 	if !ok {
 		return nil, errors.New("missing perf data")
 	}
 
-	processorCounter, ok := counter["Processor Information"]
-	if !ok {
-		return nil, errors.New("missing 'Processor Information' perf data")
-	}
-
-	for core, value := range processorCounter["C1 Transitions/sec"] {
-		ch <- prometheus.MustNewConstMetric(
-			c.CStateSecondsTotal,
-			prometheus.CounterValue,
-			value,
-			core, "c1",
-		)
-	}
-
-	for core, value := range processorCounter["C2 Transitions/sec"] {
-		ch <- prometheus.MustNewConstMetric(
-			c.CStateSecondsTotal,
-			prometheus.CounterValue,
-			value,
-			core, "c2",
-		)
-	}
-
-	for core, value := range processorCounter["C3 Transitions/sec"] {
-		ch <- prometheus.MustNewConstMetric(
-			c.CStateSecondsTotal,
-			prometheus.CounterValue,
-			value,
-			core, "c3",
-		)
-	}
-
-	for core, value := range processorCounter["% Idle Time"] {
-		ch <- prometheus.MustNewConstMetric(
-			c.TimeTotal,
-			prometheus.CounterValue,
-			value,
-			core, "idle",
-		)
-	}
-
-	for core, value := range processorCounter["% Interrupt Time"] {
-		ch <- prometheus.MustNewConstMetric(
-			c.TimeTotal,
-			prometheus.CounterValue,
-			value,
-			core, "interrupt",
-		)
-	}
-
-	for core, value := range processorCounter["% DPC Time"] {
-		ch <- prometheus.MustNewConstMetric(
-			c.TimeTotal,
-			prometheus.CounterValue,
-			value,
-			core, "dpc",
-		)
-	}
-
-	for core, value := range processorCounter["% Privileged Time"] {
-		ch <- prometheus.MustNewConstMetric(
-			c.TimeTotal,
-			prometheus.CounterValue,
-			value,
-			core, "privileged",
-		)
-	}
-
-	for core, value := range processorCounter["% User Time"] {
-		ch <- prometheus.MustNewConstMetric(
-			c.TimeTotal,
-			prometheus.CounterValue,
-			value,
-			core, "user",
-		)
-	}
-
-	for core, value := range processorCounter["Interrupts/sec"] {
-		ch <- prometheus.MustNewConstMetric(
-			c.InterruptsTotal,
-			prometheus.CounterValue,
-			value,
-			core,
-		)
-	}
-
-	for core, value := range processorCounter["DPCs Queued/sec"] {
-		ch <- prometheus.MustNewConstMetric(
-			c.DPCsTotal,
-			prometheus.CounterValue,
-			value,
-			core,
-		)
-	}
-
-	for core, value := range processorCounter["Clock Interrupts/sec"] {
-		ch <- prometheus.MustNewConstMetric(
-			c.ClockInterruptsTotal,
-			prometheus.CounterValue,
-			value,
-			core,
-		)
-	}
-
-	for core, value := range processorCounter["Idle Break Events/sec"] {
-		ch <- prometheus.MustNewConstMetric(
-			c.IdleBreakEventsTotal,
-			prometheus.CounterValue,
-			value,
-			core,
-		)
-	}
-
-	for core, value := range processorCounter["Parking Status"] {
-		ch <- prometheus.MustNewConstMetric(
-			c.ParkingStatus,
-			prometheus.GaugeValue,
-			value,
-			core,
-		)
-	}
-
-	for core, value := range processorCounter["Processor Frequency"] {
-		ch <- prometheus.MustNewConstMetric(
-			c.ProcessorFrequencyMHz,
-			prometheus.GaugeValue,
-			value,
-			core,
-		)
-	}
-
-	for core, value := range processorCounter["% Processor Performance"] {
-		ch <- prometheus.MustNewConstMetric(
-			c.ProcessorPerformance,
-			prometheus.CounterValue,
-			value,
-			core,
-		)
-	}
-
-	for core, value := range processorCounter["% Processor Utility"] {
-		ch <- prometheus.MustNewConstMetric(
-			c.ProcessorUtility,
-			prometheus.CounterValue,
-			value,
-			core,
-		)
-	}
-
-	for core, value := range processorCounter["% Privileged Utility"] {
-		ch <- prometheus.MustNewConstMetric(
-			c.ProcessorPrivUtility,
-			prometheus.CounterValue,
-			value,
-			core,
-		)
+	for objectName, objectCounters := range counters {
+		for instanceName, instanceCounter := range objectCounters {
+			for instance, value := range instanceCounter {
+				ch <- prometheus.MustNewConstMetric(
+					c.descriptors[objectName][instanceName],
+					prometheus.CounterValue,
+					value,
+					instance,
+				)
+			}
+		}
 	}
 
 	return nil, nil
+}
+
+func sanitizeMetricName(name string) string {
+	return strings.ReplaceAll(
+		strings.TrimSpace(
+			strings.ReplaceAll(
+				strings.ReplaceAll(
+					strings.ReplaceAll(
+						strings.ToLower(name),
+						".", "",
+					),
+					"%", "",
+				),
+				"/", "_",
+			),
+		),
+		" ", "_",
+	)
 }
