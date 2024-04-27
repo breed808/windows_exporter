@@ -134,6 +134,9 @@ func (c *collector) Build() error {
 
 	var perfCounterInfos map[string]pdh.CounterInfos
 	perfCounterInfos, err = c.perfCounters.GetInfo()
+	if err != nil {
+		return fmt.Errorf("failed to get perf data info: %w", err)
+	}
 
 	counterInfos, ok := perfCounterInfos["localhost"]
 	if !ok {
