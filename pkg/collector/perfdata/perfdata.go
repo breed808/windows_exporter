@@ -9,34 +9,82 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus-community/windows_exporter/pkg/pdh"
+	"github.com/prometheus-community/windows_exporter/pkg/perflib"
 	"github.com/prometheus-community/windows_exporter/pkg/types"
 	"github.com/prometheus/client_golang/prometheus"
+	"gopkg.in/yaml.v3"
+	"strconv"
 	"strings"
 )
 
-const Name = "perfdata"
+const (
+	Name = "perfdata"
 
-type Config struct{}
+	FlagPerfDataObjects               = "collector.perfdata.objects"
+	FlagPerfDataIgnoredErrors         = "collector.perfdata.ignored-errors"
+	FlagPerfDataUseWildcardsExpansion = "collector.perfdata.use-wildcards-expansion"
+)
 
-var ConfigDefaults = Config{}
+type Config struct {
+	Objects               []pdh.PerfObject `yaml:"objects"`
+	IgnoredErrors         []string         `yaml:"ignoredErrors"`
+	UseWildcardsExpansion bool             `yaml:"useWildcardsExpansion"`
+}
 
-// A collector is a Prometheus collector for WMI metrics
+var ConfigDefaults = Config{
+	Objects:               make([]pdh.PerfObject, 0),
+	IgnoredErrors:         make([]string, 0),
+	UseWildcardsExpansion: true,
+}
+
+// A collector is a Prometheus collector for perfdata metrics
 type collector struct {
 	logger log.Logger
 
+	ignoredErrors         *[]string
+	objectsPlain          *string
+	objects               []pdh.PerfObject
+	useWildcardsExpansion *bool
+
 	perfCounters pdh.WinPerfCounters
 
-	descriptors map[string]map[string]*prometheus.Desc
+	metrics map[string]map[string]metricMetadata
 }
 
-func New(logger log.Logger, _ *Config) types.Collector {
-	c := &collector{}
+type metricMetadata struct {
+	desc      *prometheus.Desc
+	valueType prometheus.ValueType
+}
+
+func New(logger log.Logger, config *Config) types.Collector {
+	if config == nil {
+		config = &ConfigDefaults
+	}
+
+	c := &collector{
+		ignoredErrors:         &config.IgnoredErrors,
+		useWildcardsExpansion: &config.UseWildcardsExpansion,
+		objects:               config.Objects,
+	}
 	c.SetLogger(logger)
 	return c
 }
 
-func NewWithFlags(_ *kingpin.Application) types.Collector {
-	return &collector{}
+func NewWithFlags(app *kingpin.Application) types.Collector {
+	return &collector{
+		ignoredErrors: app.Flag(
+			FlagPerfDataIgnoredErrors,
+			"IgnoredErrors accepts a list of PDH error codes, if this error is encountered it will be ignored. For example, you can provide \"PDH_NO_DATA\" to ignore performance counters with no instances, but by default no errors are ignored.",
+		).Default("").Strings(),
+		objectsPlain: app.Flag(
+			FlagPerfDataObjects,
+			"Objects of performance data to observe. See docs for more information on how to use this flag. By default, no objects are observed.",
+		).Default("").String(),
+		useWildcardsExpansion: app.Flag(
+			FlagPerfDataUseWildcardsExpansion,
+			"Wildcards can be used in the instance name and the counter name. Instance indexes will also be returned in the instance name.",
+		).Default(strconv.FormatBool(ConfigDefaults.UseWildcardsExpansion)).Bool(),
+	}
 }
 
 func (c *collector) GetName() string {
@@ -52,63 +100,66 @@ func (c *collector) GetPerfCounter() ([]string, error) {
 }
 
 func (c *collector) Build() error {
+	_ = level.Warn(c.logger).Log("msg", "perfdata collector is in an experimental state! The configuration may change in future.")
+
+	if *c.objectsPlain != "" {
+		err := yaml.Unmarshal([]byte(*c.objectsPlain), &c.objects)
+		if err != nil {
+			return fmt.Errorf("error parsing object flag: %w", err)
+		}
+	}
+
+	objects := make([]pdh.PerfObject, len(c.objects))
+
+	for i, object := range c.objects {
+		object.UseRawValues = true
+
+		objects[i] = object
+	}
+
 	c.perfCounters = pdh.WinPerfCounters{
 		Log:                        c.logger,
-		PrintValid:                 false,
-		UsePerfCounterTime:         true,
-		UseWildcardsExpansion:      true,
+		UsePerfCounterTime:         false,
+		UseWildcardsExpansion:      *c.useWildcardsExpansion,
 		LocalizeWildcardsExpansion: true,
-		Object: []pdh.PerfObject{
-			{
-				FailOnMissing: true,
-				ObjectName:    "Processor Information",
-				Instances:     []string{"*"},
-				Counters:      []string{"% Processor Utility"},
-				UseRawValues:  true,
-				IncludeTotal:  false,
-			},
-			//{
-			//	FailOnMissing: true,
-			//	ObjectName:    "LogicalDisk",
-			//	Instances:     []string{"*"},
-			//	Counters:      []string{"*"},
-			//	UseRawValues:  true,
-			//	IncludeTotal:  false,
-			//},
-			//{
-			//	FailOnMissing: true,
-			//	ObjectName:    "PhysicalDisk",
-			//	Instances:     []string{"*"},
-			//	Counters:      []string{"*"},
-			//	UseRawValues:  true,
-			//	IncludeTotal:  false,
-			//},
-		},
+		IgnoredErrors:              *c.ignoredErrors,
+		Object:                     objects,
 	}
 
-	acc, err := c.perfCounters.Gather()
+	err := c.perfCounters.Init()
 	if err != nil {
-		return fmt.Errorf("failed to gather perf data: %w", err)
+		return fmt.Errorf("failed to initialize perf data: %w", err)
 	}
 
-	counters, ok := acc["localhost"]
+	perfCounterInfos, err := c.perfCounters.GetInfo()
+
+	counterInfos, ok := perfCounterInfos["localhost"]
 	if !ok {
 		return errors.New("missing perf data")
 	}
 
-	c.descriptors = map[string]map[string]*prometheus.Desc{}
-	for objectName, objectCounters := range counters {
+	c.metrics = map[string]map[string]metricMetadata{}
+	for objectName, objectCounters := range counterInfos {
 		subSystem := sanitizeMetricName(objectName)
 
-		c.descriptors[objectName] = map[string]*prometheus.Desc{}
-		for instanceName, _ := range objectCounters {
-			name := sanitizeMetricName(instanceName)
-			c.descriptors[objectName][instanceName] = prometheus.NewDesc(
+		c.metrics[objectName] = map[string]metricMetadata{}
+
+		for counterName, counterInfo := range objectCounters {
+			name := sanitizeMetricName(counterName)
+			metadata := metricMetadata{}
+			metadata.valueType, err = perflib.GetPrometheusValueType(counterInfo.CounterType)
+			if err != nil {
+				return fmt.Errorf("failed to get prometheus value type: %w", err)
+			}
+
+			metadata.desc = prometheus.NewDesc(
 				prometheus.BuildFQName(types.Namespace+"_perfdata", subSystem, name),
-				fmt.Sprintf("Perf counter %s @ %s", objectName, instanceName),
+				counterInfo.ExplainText,
 				[]string{"instance"},
 				nil,
 			)
+
+			c.metrics[objectName][counterName] = metadata
 		}
 	}
 
@@ -119,7 +170,7 @@ func (c *collector) Build() error {
 // to the provided prometheus Metric channel.
 func (c *collector) Collect(ctx *types.ScrapeContext, ch chan<- prometheus.Metric) error {
 	if desc, err := c.collect(ctx, ch); err != nil {
-		_ = level.Error(c.logger).Log("failed collecting os metrics", "desc", desc, "err", err)
+		_ = level.Error(c.logger).Log("failed collecting perfdata metrics", "desc", desc, "err", err)
 		return err
 	}
 	return nil
@@ -131,17 +182,17 @@ func (c *collector) collect(_ *types.ScrapeContext, ch chan<- prometheus.Metric)
 		return nil, fmt.Errorf("failed to gather perf data: %w", err)
 	}
 
-	counters, ok := acc["localhost"]
+	hostResult, ok := acc["localhost"]
 	if !ok {
 		return nil, errors.New("missing perf data")
 	}
 
-	for objectName, objectCounters := range counters {
-		for instanceName, instanceCounter := range objectCounters {
-			for instance, value := range instanceCounter {
+	for objectName, objectCounters := range hostResult {
+		for counterName, counters := range objectCounters {
+			for instance, value := range counters {
 				ch <- prometheus.MustNewConstMetric(
-					c.descriptors[objectName][instanceName],
-					prometheus.CounterValue,
+					c.metrics[objectName][counterName].desc,
+					c.metrics[objectName][counterName].valueType,
 					value,
 					instance,
 				)
@@ -153,19 +204,12 @@ func (c *collector) collect(_ *types.ScrapeContext, ch chan<- prometheus.Metric)
 }
 
 func sanitizeMetricName(name string) string {
-	return strings.ReplaceAll(
-		strings.TrimSpace(
-			strings.ReplaceAll(
-				strings.ReplaceAll(
-					strings.ReplaceAll(
-						strings.ToLower(name),
-						".", "",
-					),
-					"%", "",
-				),
-				"/", "_",
-			),
-		),
+	replacer := strings.NewReplacer(
+		".", "",
+		"%", "",
+		"/", "_",
 		" ", "_",
 	)
+
+	return strings.Trim(replacer.Replace(strings.ToLower(name)), "_")
 }

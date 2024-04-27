@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"golang.org/x/sys/windows"
 	"os"
 	"strings"
 	"sync"
@@ -18,15 +19,16 @@ import (
 var defaultMaxBufferSize = 100 * 1024 * 1024
 
 type Accumulator map[string]map[string]map[string]float64
+type CounterInfos map[string]map[string]CounterInfo
 
 type WinPerfCounters struct {
-	PrintValid                 bool `toml:"PrintValid"`
-	PreVistaSupport            bool `toml:"PreVistaSupport" deprecated:"1.7.0;determined dynamically"`
+	PrintValid                 bool
+	PreVistaSupport            bool
 	UsePerfCounterTime         bool
 	Object                     []PerfObject
 	UseWildcardsExpansion      bool
 	LocalizeWildcardsExpansion bool
-	IgnoredErrors              []string `toml:"IgnoredErrors"`
+	IgnoredErrors              []string
 	MaxBufferSize              int64
 	Sources                    []string
 
@@ -49,15 +51,24 @@ type hostCountersInfo struct {
 	timestamp time.Time
 }
 
+type CounterInfo struct {
+	CounterType  uint32
+	ObjectName   string
+	InstanceName string
+	CounterName  string
+	FullPath     string
+	ExplainText  string
+}
+
 type PerfObject struct {
 	Sources       []string
-	ObjectName    string
-	Counters      []string
-	Instances     []string
+	ObjectName    string   `yaml:"objectName"`
+	Counters      []string `yaml:"counters"`
+	Instances     []string `yaml:"instances"`
 	Measurement   string
 	WarnOnMissing bool
 	FailOnMissing bool
-	IncludeTotal  bool
+	IncludeTotal  bool `yaml:"includeTotal"`
 	UseRawValues  bool
 }
 
@@ -287,7 +298,7 @@ func (m *WinPerfCounters) AddItem(counterPath, computer, objectName, instance, c
 			hostCounter.counters = append(hostCounter.counters, newItem)
 
 			if m.PrintValid {
-				level.Info(m.Log).Log(fmt.Sprintf("Valid: %s", counterPath))
+				level.Info(m.Log).Log("msg", fmt.Sprintf("Valid: %s", counterPath))
 			}
 		}
 	} else {
@@ -304,7 +315,7 @@ func (m *WinPerfCounters) AddItem(counterPath, computer, objectName, instance, c
 		)
 		hostCounter.counters = append(hostCounter.counters, newItem)
 		if m.PrintValid {
-			level.Info(m.Log).Log(fmt.Sprintf("Valid: %s", counterPath))
+			level.Info(m.Log).Log("msg", fmt.Sprintf("Valid: %s", counterPath))
 		}
 	}
 
@@ -355,7 +366,7 @@ func (m *WinPerfCounters) ParseConfig() error {
 			}
 			for _, counter := range PerfObject.Counters {
 				if len(PerfObject.Instances) == 0 {
-					level.Warn(m.Log).Log(fmt.Sprintf("Missing 'Instances' param for object %q", PerfObject.ObjectName))
+					level.Warn(m.Log).Log("msg", fmt.Sprintf("Missing 'Instances' param for object %q", PerfObject.ObjectName))
 				}
 				for _, instance := range PerfObject.Instances {
 					objectName := PerfObject.ObjectName
@@ -365,7 +376,7 @@ func (m *WinPerfCounters) ParseConfig() error {
 						PerfObject.Measurement, PerfObject.IncludeTotal, PerfObject.UseRawValues)
 					if err != nil {
 						if PerfObject.FailOnMissing || PerfObject.WarnOnMissing {
-							level.Error(m.Log).Log(fmt.Sprintf("Invalid counterPath %q: %s", counterPath, err.Error()))
+							level.Error(m.Log).Log("msg", fmt.Sprintf("Invalid counterPath %q: %s", counterPath, err.Error()))
 						}
 						if PerfObject.FailOnMissing {
 							return err
@@ -393,26 +404,73 @@ func (m *WinPerfCounters) checkError(err error) error {
 	return err
 }
 
-func (m *WinPerfCounters) Gather() (map[string]Accumulator, error) {
-	// Parse the config once
-	var err error
+func (m *WinPerfCounters) GetInfo() (map[string]CounterInfos, error) {
+	var wg sync.WaitGroup
+	info := map[string]CounterInfos{}
 
+	// iterate over computers
+	for _, hostCounterInfo := range m.hostCounters {
+		wg.Add(1)
+		go func(hostInfo *hostCountersInfo) {
+			level.Debug(m.Log).Log("msg", fmt.Sprintf("Gathering from %s", hostInfo.computer))
+
+			info[hostInfo.computer] = make(CounterInfos)
+
+			start := time.Now()
+			for _, counter := range hostInfo.counters {
+				counterInfo, err := hostInfo.query.GetCounterInfo(counter.counterHandle, 1)
+				if err != nil {
+					level.Error(m.Log).Log("msg", fmt.Sprintf("error during collecting info on host %s", hostInfo.computer), "err", err)
+				}
+
+				objectName := windows.UTF16PtrToString(counterInfo.SzObjectName)
+				counterName := windows.UTF16PtrToString(counterInfo.SzCounterName)
+
+				if _, ok := info[hostInfo.computer][objectName]; !ok {
+					info[hostInfo.computer][objectName] = make(map[string]CounterInfo)
+				}
+				info[hostInfo.computer][objectName][counterName] = CounterInfo{
+					CounterType: counterInfo.DwType,
+					ObjectName:  windows.UTF16PtrToString(counterInfo.SzObjectName),
+					CounterName: windows.UTF16PtrToString(counterInfo.SzCounterName),
+					FullPath:    windows.UTF16PtrToString(counterInfo.SzFullPath),
+					ExplainText: windows.UTF16PtrToString(counterInfo.SzExplainText),
+				}
+			}
+
+			level.Debug(m.Log).Log("msg", fmt.Sprintf("Gathering info from %s finished in %v", hostInfo.computer, time.Since(start)))
+			wg.Done()
+		}(hostCounterInfo)
+	}
+
+	wg.Wait()
+	return info, nil
+}
+
+func (m *WinPerfCounters) Init() error {
 	if m.lastRefreshed.IsZero() {
 		if err := m.cleanQueries(); err != nil {
-			return map[string]Accumulator{}, err
+			return err
 		}
 
 		if err := m.ParseConfig(); err != nil {
-			return map[string]Accumulator{}, err
+			return err
 		}
 		for _, hostCounterSet := range m.hostCounters {
 			// some counters need two data samples before computing a value
-			if err = hostCounterSet.query.CollectData(); err != nil {
-				return map[string]Accumulator{}, m.checkError(err)
+			if err := hostCounterSet.query.CollectData(); err != nil {
+				return m.checkError(err)
 			}
 		}
 		m.lastRefreshed = time.Now()
 	}
+
+	return nil
+}
+
+func (m *WinPerfCounters) Gather() (map[string]Accumulator, error) {
+	// Parse the config once
+	var err error
 
 	for _, hostCounterSet := range m.hostCounters {
 		if m.UsePerfCounterTime && hostCounterSet.query.IsVistaOrNewer() {
@@ -436,12 +494,12 @@ func (m *WinPerfCounters) Gather() (map[string]Accumulator, error) {
 		go func(hostInfo *hostCountersInfo) {
 			var err error
 
-			level.Debug(m.Log).Log(fmt.Sprintf("Gathering from %s", hostInfo.computer))
+			level.Debug(m.Log).Log("msg", fmt.Sprintf("Gathering from %s", hostInfo.computer))
 			start := time.Now()
 			acc[hostInfo.computer], err = m.gatherComputerCounters(hostInfo)
-			level.Debug(m.Log).Log(fmt.Sprintf("Gathering from %s finished in %v", hostInfo.computer, time.Since(start)))
+			level.Debug(m.Log).Log("msg", fmt.Sprintf("Gathering from %s finished in %v", hostInfo.computer, time.Since(start)))
 			if err != nil {
-				level.Error(m.Log).Log(fmt.Errorf("error during collecting data on host %q: %w", hostInfo.computer, err))
+				level.Error(m.Log).Log("msg", fmt.Sprintf("error during collecting data on host %s", hostInfo.computer), "err", err)
 			}
 			wg.Done()
 		}(hostCounterInfo)
@@ -452,7 +510,6 @@ func (m *WinPerfCounters) Gather() (map[string]Accumulator, error) {
 }
 
 func (m *WinPerfCounters) gatherComputerCounters(hostCounterInfo *hostCountersInfo) (Accumulator, error) {
-	var rawValue int64
 	var value float64
 	var err error
 
@@ -462,8 +519,7 @@ func (m *WinPerfCounters) gatherComputerCounters(hostCounterInfo *hostCountersIn
 		// collect
 		if m.UseWildcardsExpansion {
 			if metric.useRawValue {
-				rawValue, err = hostCounterInfo.query.GetRawCounterValue(metric.counterHandle)
-				value = float64(rawValue)
+				value, err = hostCounterInfo.query.GetRawCounterValue(metric.counterHandle)
 			} else {
 				value, err = hostCounterInfo.query.GetFormattedCounterValueDouble(metric.counterHandle)
 			}
@@ -472,7 +528,11 @@ func (m *WinPerfCounters) gatherComputerCounters(hostCounterInfo *hostCountersIn
 				if !isKnownCounterDataError(err) {
 					return Accumulator{}, fmt.Errorf("error while getting value for counter %q: %w", metric.counterPath, err)
 				}
-				level.Warn(m.Log).Log(fmt.Sprintf("Error while getting value for counter %q, instance: %s, will skip metric: %v", metric.counterPath, metric.instance, err))
+				level.Warn(m.Log).Log("msg", fmt.Sprintf("Error while getting value for counter %q, instance: %s, will skip metric: %v", metric.counterPath, metric.instance, err))
+				continue
+			}
+
+			if !metric.includeTotal && strings.Contains(metric.instance, "_Total") {
 				continue
 			}
 
@@ -497,7 +557,7 @@ func (m *WinPerfCounters) gatherComputerCounters(hostCounterInfo *hostCountersIn
 				if !isKnownCounterDataError(err) {
 					return Accumulator{}, fmt.Errorf("error while getting value for counter %q: %w", metric.counterPath, err)
 				}
-				level.Warn(m.Log).Log(fmt.Sprintf("Error while getting value for counter %q, instance: %s, will skip metric: %v", metric.counterPath, metric.instance, err))
+				level.Warn(m.Log).Log("msg", fmt.Sprintf("Error while getting value for counter %q, instance: %s, will skip metric: %v", metric.counterPath, metric.instance, err))
 				continue
 			}
 			for _, cValue := range counterValues {
@@ -507,17 +567,19 @@ func (m *WinPerfCounters) gatherComputerCounters(hostCounterInfo *hostCountersIn
 					cValue.InstanceName = metric.instance
 				}
 
+				if !shouldIncludeMetric(metric, cValue) {
+					continue
+				}
+
 				if _, ok := acc[metric.objectName]; !ok {
 					acc[metric.objectName] = make(map[string]map[string]float64)
 				}
 
-				if _, ok := acc[metric.counter]; !ok {
+				if _, ok := acc[metric.objectName][metric.counter]; !ok {
 					acc[metric.objectName][metric.counter] = make(map[string]float64)
 				}
 
-				if shouldIncludeMetric(metric, cValue) {
-					acc[metric.objectName][metric.counter][cValue.InstanceName] = cValue.Value
-				}
+				acc[metric.objectName][metric.counter][metric.instance] = value
 			}
 		}
 	}
@@ -560,6 +622,7 @@ func isKnownCounterDataError(err error) bool {
 		pdhErr.ErrorCode == PdhCalcNegativeDenominator ||
 		pdhErr.ErrorCode == PdhCalcNegativeValue ||
 		pdhErr.ErrorCode == PdhCstatusInvalidData ||
+		pdhErr.ErrorCode == PdhCstatusNoInstance ||
 		pdhErr.ErrorCode == PdhNoData) {
 		return true
 	}

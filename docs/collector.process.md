@@ -11,7 +11,6 @@ Enabled by default? | No
 
 ## Flags
 
-<<<<<<< HEAD
 ### `--collector.process.include`
 
 Regexp of processes to include. Process name must both match `include` and not

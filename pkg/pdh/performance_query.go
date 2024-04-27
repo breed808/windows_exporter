@@ -5,7 +5,7 @@ package pdh
 
 import (
 	"errors"
-	"syscall"
+	"golang.org/x/sys/windows"
 	"time"
 	"unsafe"
 )
@@ -30,9 +30,10 @@ type PerformanceQuery interface {
 	AddCounterToQuery(counterPath string) (pdhCounterHandle, error)
 	AddEnglishCounterToQuery(counterPath string) (pdhCounterHandle, error)
 	GetCounterPath(counterHandle pdhCounterHandle) (string, error)
+	GetCounterInfo(counterHandle pdhCounterHandle, retrieveExplainText int) (*PdhCounterInfo, error)
 	ExpandWildCardPath(counterPath string) ([]string, error)
 	GetFormattedCounterValueDouble(hCounter pdhCounterHandle) (float64, error)
-	GetRawCounterValue(hCounter pdhCounterHandle) (int64, error)
+	GetRawCounterValue(hCounter pdhCounterHandle) (float64, error)
 	GetFormattedCounterArrayDouble(hCounter pdhCounterHandle) ([]CounterValue, error)
 	GetRawCounterArray(hCounter pdhCounterHandle) ([]CounterValue, error)
 	CollectData() error
@@ -127,17 +128,27 @@ func (m *PerformanceQueryImpl) AddEnglishCounterToQuery(counterPath string) (pdh
 	return counterHandle, nil
 }
 
-// GetCounterPath return counter information for given handle
+// GetCounterPath return counter path for given handle
 func (m *PerformanceQueryImpl) GetCounterPath(counterHandle pdhCounterHandle) (string, error) {
+	ci, err := m.GetCounterInfo(counterHandle, 0)
+	if err != nil {
+		return "", err
+	}
+
+	return windows.UTF16PtrToString(ci.SzFullPath), nil
+}
+
+// GetCounterInfo return counter information for given handle
+func (m *PerformanceQueryImpl) GetCounterInfo(counterHandle pdhCounterHandle, retrieveExplainText int) (*PdhCounterInfo, error) {
 	for buflen := initialBufferSize; buflen <= m.maxBufferSize; buflen *= 2 {
 		buf := make([]byte, buflen)
 
 		// Get the info with the current buffer size
 		size := buflen
-		ret := PdhGetCounterInfo(counterHandle, 0, &size, &buf[0])
+		ret := PdhGetCounterInfo(counterHandle, retrieveExplainText, &size, &buf[0])
 		if ret == ErrorSuccess {
 			ci := (*PdhCounterInfo)(unsafe.Pointer(&buf[0])) //nolint:gosec // G103: Valid use of unsafe call to create PDH_COUNTER_INFO
-			return UTF16PtrToString(ci.SzFullPath), nil
+			return ci, nil
 		}
 
 		// Use the size as a hint if it exceeds the current buffer size
@@ -147,11 +158,11 @@ func (m *PerformanceQueryImpl) GetCounterPath(counterHandle pdhCounterHandle) (s
 
 		// We got a non-recoverable error so exit here
 		if ret != PdhMoreData {
-			return "", NewPdhError(ret)
+			return nil, NewPdhError(ret)
 		}
 	}
 
-	return "", errBufferLimitReached
+	return nil, errBufferLimitReached
 }
 
 // ExpandWildCardPath  examines local computer and returns those counter paths that match the given counter path which contains wildcard characters.
@@ -208,7 +219,7 @@ func (m *PerformanceQueryImpl) GetFormattedCounterArrayDouble(hCounter pdhCounte
 			values := make([]CounterValue, 0, itemCount)
 			for _, item := range items {
 				if item.FmtValue.CStatus == PdhCstatusValidData || item.FmtValue.CStatus == PdhCstatusNewData {
-					val := CounterValue{UTF16PtrToString(item.SzName), item.FmtValue.DoubleValue}
+					val := CounterValue{windows.UTF16PtrToString(item.SzName), item.FmtValue.DoubleValue}
 					values = append(values, val)
 				}
 			}
@@ -243,7 +254,7 @@ func (m *PerformanceQueryImpl) GetRawCounterArray(hCounter pdhCounterHandle) ([]
 			values := make([]CounterValue, 0, itemCount)
 			for _, item := range items {
 				if item.RawValue.CStatus == PdhCstatusValidData || item.RawValue.CStatus == PdhCstatusNewData {
-					val := CounterValue{UTF16PtrToString(item.SzName), float64(item.RawValue.FirstValue)}
+					val := CounterValue{windows.UTF16PtrToString(item.SzName), float64(item.RawValue.FirstValue)}
 					values = append(values, val)
 				}
 			}
@@ -291,7 +302,7 @@ func (m *PerformanceQueryImpl) IsVistaOrNewer() bool {
 	return PdhAddEnglishCounterSupported()
 }
 
-func (m *PerformanceQueryImpl) GetRawCounterValue(hCounter pdhCounterHandle) (int64, error) {
+func (m *PerformanceQueryImpl) GetRawCounterValue(hCounter pdhCounterHandle) (float64, error) {
 	if m.query == 0 {
 		return 0, errors.New("uninitialised query")
 	}
@@ -302,32 +313,23 @@ func (m *PerformanceQueryImpl) GetRawCounterValue(hCounter pdhCounterHandle) (in
 
 	if ret = PdhGetRawCounterValue(hCounter, &counterType, &value); ret == ErrorSuccess {
 		if value.CStatus == PdhCstatusValidData || value.CStatus == PdhCstatusNewData {
-			return value.FirstValue, nil
+			return float64(value.FirstValue), nil
 		}
 		return 0, NewPdhError(value.CStatus)
 	}
 	return 0, NewPdhError(ret)
 }
 
-// UTF16PtrToString converts Windows API LPTSTR (pointer to string) to go string
-func UTF16PtrToString(s *uint16) string {
-	if s == nil {
-		return ""
-	}
-	//nolint:gosec // G103: Valid use of unsafe call to create string from Windows API LPTSTR (pointer to string)
-	return syscall.UTF16ToString((*[1 << 29]uint16)(unsafe.Pointer(s))[0:])
-}
-
 // UTF16ToStringArray converts list of Windows API NULL terminated strings  to go string array
 func UTF16ToStringArray(buf []uint16) []string {
 	var strings []string
 	nextLineStart := 0
-	stringLine := UTF16PtrToString(&buf[0])
+	stringLine := windows.UTF16PtrToString(&buf[0])
 	for stringLine != "" {
 		strings = append(strings, stringLine)
 		nextLineStart += len([]rune(stringLine)) + 1
 		remainingBuf := buf[nextLineStart:]
-		stringLine = UTF16PtrToString(&remainingBuf[0])
+		stringLine = windows.UTF16PtrToString(&remainingBuf[0])
 	}
 	return strings
 }

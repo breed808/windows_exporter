@@ -35,8 +35,9 @@ package pdh
 import (
 	"fmt"
 	"syscall"
-	"time"
 	"unsafe"
+
+	"time"
 
 	"golang.org/x/sys/windows"
 )
@@ -567,7 +568,7 @@ func PdhFormatError(msgID uint32) string {
 	buf := make([]uint16, 300)
 	_, err := windows.FormatMessage(flags, uintptr(libPdhDll.Handle), msgID, 0, buf, nil)
 	if err == nil {
-		return UTF16PtrToString(&buf[0])
+		return windows.UTF16PtrToString(&buf[0])
 	}
 	return fmt.Sprintf("(pdhErr=%d) %s", msgID, err.Error())
 }
