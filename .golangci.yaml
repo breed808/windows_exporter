@@ -23,3 +23,6 @@ issues:
   - text: "don't use ALL_CAPS in Go names; use CamelCase"
     linters:
     - revive
+  - text: "exported: type name will be used as pdh.Pdh"
+    linters:
+    - revive

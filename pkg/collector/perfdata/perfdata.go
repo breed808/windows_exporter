@@ -5,6 +5,9 @@ package perfdata
 import (
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
+
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -13,8 +16,6 @@ import (
 	"github.com/prometheus-community/windows_exporter/pkg/types"
 	"github.com/prometheus/client_golang/prometheus"
 	"gopkg.in/yaml.v3"
-	"strconv"
-	"strings"
 )
 
 const (
@@ -131,7 +132,8 @@ func (c *collector) Build() error {
 		return fmt.Errorf("failed to initialize perf data: %w", err)
 	}
 
-	perfCounterInfos, err := c.perfCounters.GetInfo()
+	var perfCounterInfos map[string]pdh.CounterInfos
+	perfCounterInfos, err = c.perfCounters.GetInfo()
 
 	counterInfos, ok := perfCounterInfos["localhost"]
 	if !ok {

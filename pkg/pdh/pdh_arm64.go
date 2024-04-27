@@ -1,4 +1,5 @@
-// Copyright (c) 2010 The win Authors. All rights reserved.
+// Copyright (c) 2010-2024 The win Authors. All rights reserved.
+// Copyright (c) 2024 The prometheus-community Authors. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -38,13 +39,13 @@ type PdhFmtCountervalueDouble struct {
 	DoubleValue float64
 }
 
-// PdhFmtCountervalueLarge is a union specialization for 64-bit integer values
+// PdhFmtCounterValueLarge is a union specialization for 64-bit integer values
 type PdhFmtCountervalueLarge struct {
 	CStatus    uint32
 	LargeValue int64
 }
 
-// PdhFmtCountervalueLong is a union specialization for long values
+// PdhFmtCounterValueLong is a union specialization for long values
 type PdhFmtCountervalueLong struct {
 	CStatus   uint32
 	LongValue int32
@@ -56,13 +57,13 @@ type PdhFmtCountervalueItemDouble struct {
 	FmtValue PdhFmtCountervalueDouble
 }
 
-// PdhFmtCountervalueItemLarge is a union specialization for 'large' values, used by PdhGetFormattedCounterArrayLarge()
+// PdhFmtCounterValueItemLarge is a union specialization for 'large' values, used by PdhGetFormattedCounterArrayLarge()
 type PdhFmtCountervalueItemLarge struct {
 	SzName   *uint16 // pointer to a string
 	FmtValue PdhFmtCountervalueLarge
 }
 
-// PdhFmtCountervalueItemLong is a union specialization for long values, used by PdhGetFormattedCounterArrayLong()
+// PdhFmtCounterValueItemLong is a union specialization for long values, used by PdhGetFormattedCounterArrayLong()
 type PdhFmtCountervalueItemLong struct {
 	SzName   *uint16 // pointer to a string
 	FmtValue PdhFmtCountervalueLong

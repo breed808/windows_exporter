@@ -6,11 +6,12 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"golang.org/x/sys/windows"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sys/windows"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -173,10 +174,6 @@ func newCounter(
 	includeTotal bool,
 	useRawValue bool,
 ) *counter {
-	newCounterName := counterName
-	if useRawValue {
-		newCounterName += "_Raw"
-	}
 	return &counter{counterPath, computer, objectName, counterName, instance, measurement,
 		includeTotal, useRawValue, counterHandle}
 }
@@ -296,10 +293,6 @@ func (m *WinPerfCounters) AddItem(counterPath, computer, objectName, instance, c
 			}
 
 			hostCounter.counters = append(hostCounter.counters, newItem)
-
-			if m.PrintValid {
-				level.Info(m.Log).Log("msg", fmt.Sprintf("Valid: %s", counterPath))
-			}
 		}
 	} else {
 		newItem := newCounter(
@@ -314,9 +307,6 @@ func (m *WinPerfCounters) AddItem(counterPath, computer, objectName, instance, c
 			useRawValue,
 		)
 		hostCounter.counters = append(hostCounter.counters, newItem)
-		if m.PrintValid {
-			level.Info(m.Log).Log("msg", fmt.Sprintf("Valid: %s", counterPath))
-		}
 	}
 
 	return nil
@@ -528,7 +518,7 @@ func (m *WinPerfCounters) gatherComputerCounters(hostCounterInfo *hostCountersIn
 				if !isKnownCounterDataError(err) {
 					return Accumulator{}, fmt.Errorf("error while getting value for counter %q: %w", metric.counterPath, err)
 				}
-				level.Warn(m.Log).Log("msg", fmt.Sprintf("Error while getting value for counter %q, instance: %s, will skip metric: %v", metric.counterPath, metric.instance, err))
+				_ = level.Warn(m.Log).Log("msg", fmt.Sprintf("Error while getting value for counter %q, instance: %s, will skip metric: %v", metric.counterPath, metric.instance, err))
 				continue
 			}
 

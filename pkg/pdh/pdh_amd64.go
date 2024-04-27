@@ -1,4 +1,5 @@
-// Copyright (c) 2010 The win Authors. All rights reserved.
+// Copyright (c) 2010-2024 The win Authors. All rights reserved.
+// Copyright (c) 2024 The prometheus-community Authors. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -38,14 +39,14 @@ type PdhFmtCountervalueDouble struct {
 	DoubleValue float64
 }
 
-// PdhFmtCountervalueLarge is a union specialization for 64-bit integer values
-type PdhFmtCountervalueLarge struct {
+// PdhFmtCounterValueLarge is a union specialization for 64-bit integer values
+type PdhFmtCounterValueLarge struct {
 	CStatus    uint32
 	LargeValue int64
 }
 
-// PdhFmtCountervalueLong is a union specialization for long values
-type PdhFmtCountervalueLong struct {
+// PdhFmtCounterValueLong is a union specialization for long values
+type PdhFmtCounterValueLong struct {
 	CStatus   uint32
 	LongValue int32
 	padding   [4]byte //nolint:unused // Memory reservation
@@ -57,16 +58,16 @@ type PdhFmtCountervalueItemDouble struct {
 	FmtValue PdhFmtCountervalueDouble
 }
 
-// PdhFmtCountervalueItemLarge is a union specialization for 'large' values, used by PdhGetFormattedCounterArrayLarge()
-type PdhFmtCountervalueItemLarge struct {
+// PdhFmtCounterValueItemLarge is a union specialization for 'large' values, used by PdhGetFormattedCounterArrayLarge()
+type PdhFmtCounterValueItemLarge struct {
 	SzName   *uint16 // pointer to a string
-	FmtValue PdhFmtCountervalueLarge
+	FmtValue PdhFmtCounterValueLarge
 }
 
-// PdhFmtCountervalueItemLong is a union specialization for long values, used by PdhGetFormattedCounterArrayLong()
-type PdhFmtCountervalueItemLong struct {
+// PdhFmtCounterValueItemLong is a union specialization for long values, used by PdhGetFormattedCounterArrayLong()
+type PdhFmtCounterValueItemLong struct {
 	SzName   *uint16 // pointer to a string
-	FmtValue PdhFmtCountervalueLong
+	FmtValue PdhFmtCounterValueLong
 }
 
 // PdhCounterInfo structure contains information describing the properties of a counter. This information also includes the counter path.
@@ -132,6 +133,7 @@ type PdhRawCounter struct {
 	MultiCount uint32
 }
 
+//nolint:revive // Windows API names are in PascalCase
 type PdhRawCounterItem struct {
 	// Pointer to a null-terminated string that specifies the instance name of the counter. The string is appended to the end of this structure.
 	SzName *uint16
