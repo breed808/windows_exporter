@@ -15,14 +15,12 @@ issues:
   - don't use underscores in Go names
   - don't use an underscore in package name
   - exported type .+ should have comment or be unexported
+  - "exported: func name will be used as pdh.Pdh.+"
   exclude-rules:
   - # Golint has many capitalisation complaints on WMI class names
     text: "`?\\w+`? should be `?\\w+`?"
     linters:
     - revive
   - text: "don't use ALL_CAPS in Go names; use CamelCase"
-    linters:
-    - revive
-  - text: "exported: type name will be used as pdh.Pdh"
     linters:
     - revive

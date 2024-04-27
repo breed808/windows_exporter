@@ -356,7 +356,7 @@ func (m *WinPerfCounters) ParseConfig() error {
 			}
 			for _, counter := range PerfObject.Counters {
 				if len(PerfObject.Instances) == 0 {
-					level.Warn(m.Log).Log("msg", fmt.Sprintf("Missing 'Instances' param for object %q", PerfObject.ObjectName))
+					_ = level.Warn(m.Log).Log("msg", fmt.Sprintf("Missing 'Instances' param for object %q", PerfObject.ObjectName))
 				}
 				for _, instance := range PerfObject.Instances {
 					objectName := PerfObject.ObjectName
@@ -366,7 +366,7 @@ func (m *WinPerfCounters) ParseConfig() error {
 						PerfObject.Measurement, PerfObject.IncludeTotal, PerfObject.UseRawValues)
 					if err != nil {
 						if PerfObject.FailOnMissing || PerfObject.WarnOnMissing {
-							level.Error(m.Log).Log("msg", fmt.Sprintf("Invalid counterPath %q: %s", counterPath, err.Error()))
+							_ = level.Error(m.Log).Log("msg", fmt.Sprintf("Invalid counterPath %q: %s", counterPath, err.Error()))
 						}
 						if PerfObject.FailOnMissing {
 							return err
@@ -402,7 +402,7 @@ func (m *WinPerfCounters) GetInfo() (map[string]CounterInfos, error) {
 	for _, hostCounterInfo := range m.hostCounters {
 		wg.Add(1)
 		go func(hostInfo *hostCountersInfo) {
-			level.Debug(m.Log).Log("msg", fmt.Sprintf("Gathering from %s", hostInfo.computer))
+			_ = level.Debug(m.Log).Log("msg", fmt.Sprintf("Gathering from %s", hostInfo.computer))
 
 			info[hostInfo.computer] = make(CounterInfos)
 
@@ -410,7 +410,7 @@ func (m *WinPerfCounters) GetInfo() (map[string]CounterInfos, error) {
 			for _, counter := range hostInfo.counters {
 				counterInfo, err := hostInfo.query.GetCounterInfo(counter.counterHandle, 1)
 				if err != nil {
-					level.Error(m.Log).Log("msg", fmt.Sprintf("error during collecting info on host %s", hostInfo.computer), "err", err)
+					_ = level.Error(m.Log).Log("msg", fmt.Sprintf("error during collecting info on host %s", hostInfo.computer), "err", err)
 				}
 
 				objectName := windows.UTF16PtrToString(counterInfo.SzObjectName)
@@ -428,7 +428,7 @@ func (m *WinPerfCounters) GetInfo() (map[string]CounterInfos, error) {
 				}
 			}
 
-			level.Debug(m.Log).Log("msg", fmt.Sprintf("Gathering info from %s finished in %v", hostInfo.computer, time.Since(start)))
+			_ = level.Debug(m.Log).Log("msg", fmt.Sprintf("Gathering info from %s finished in %v", hostInfo.computer, time.Since(start)))
 			wg.Done()
 		}(hostCounterInfo)
 	}
@@ -484,12 +484,12 @@ func (m *WinPerfCounters) Gather() (map[string]Accumulator, error) {
 		go func(hostInfo *hostCountersInfo) {
 			var err error
 
-			level.Debug(m.Log).Log("msg", fmt.Sprintf("Gathering from %s", hostInfo.computer))
+			_ = level.Debug(m.Log).Log("msg", fmt.Sprintf("Gathering from %s", hostInfo.computer))
 			start := time.Now()
 			acc[hostInfo.computer], err = m.gatherComputerCounters(hostInfo)
-			level.Debug(m.Log).Log("msg", fmt.Sprintf("Gathering from %s finished in %v", hostInfo.computer, time.Since(start)))
+			_ = level.Debug(m.Log).Log("msg", fmt.Sprintf("Gathering from %s finished in %v", hostInfo.computer, time.Since(start)))
 			if err != nil {
-				level.Error(m.Log).Log("msg", fmt.Sprintf("error during collecting data on host %s", hostInfo.computer), "err", err)
+				_ = level.Error(m.Log).Log("msg", fmt.Sprintf("error during collecting data on host %s", hostInfo.computer), "err", err)
 			}
 			wg.Done()
 		}(hostCounterInfo)
@@ -547,7 +547,7 @@ func (m *WinPerfCounters) gatherComputerCounters(hostCounterInfo *hostCountersIn
 				if !isKnownCounterDataError(err) {
 					return Accumulator{}, fmt.Errorf("error while getting value for counter %q: %w", metric.counterPath, err)
 				}
-				level.Warn(m.Log).Log("msg", fmt.Sprintf("Error while getting value for counter %q, instance: %s, will skip metric: %v", metric.counterPath, metric.instance, err))
+				_ = level.Warn(m.Log).Log("msg", fmt.Sprintf("Error while getting value for counter %q, instance: %s, will skip metric: %v", metric.counterPath, metric.instance, err))
 				continue
 			}
 			for _, cValue := range counterValues {
