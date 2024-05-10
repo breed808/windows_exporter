@@ -173,23 +173,23 @@ func (c *collector) Build() error {
 
 // Collect sends the metric values for each metric
 // to the provided prometheus Metric channel.
-func (c *collector) Collect(ctx *types.ScrapeContext, ch chan<- prometheus.Metric) error {
-	if desc, err := c.collect(ctx, ch); err != nil {
-		_ = level.Error(c.logger).Log("failed collecting perfdata metrics", "desc", desc, "err", err)
+func (c *collector) Collect(_ *types.ScrapeContext, ch chan<- prometheus.Metric) error {
+	if err := c.collect(ch); err != nil {
+		_ = level.Error(c.logger).Log("failed collecting perfdata metrics", "err", err)
 		return err
 	}
 	return nil
 }
 
-func (c *collector) collect(_ *types.ScrapeContext, ch chan<- prometheus.Metric) (*prometheus.Desc, error) {
+func (c *collector) collect(ch chan<- prometheus.Metric) error {
 	acc, err := c.perfCounters.Gather()
 	if err != nil {
-		return nil, fmt.Errorf("failed to gather perf data: %w", err)
+		return fmt.Errorf("failed to gather perf data: %w", err)
 	}
 
 	hostResult, ok := acc["localhost"]
 	if !ok {
-		return nil, errors.New("missing perf data")
+		return errors.New("missing perf data")
 	}
 
 	for objectName, objectCounters := range hostResult {
@@ -205,7 +205,7 @@ func (c *collector) collect(_ *types.ScrapeContext, ch chan<- prometheus.Metric)
 		}
 	}
 
-	return nil, nil
+	return nil
 }
 
 func sanitizeMetricName(name string) string {
